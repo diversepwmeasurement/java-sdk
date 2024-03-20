@@ -1,123 +1,134 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support documentation.
-# This workflow will download a prebuilt Java version, install dependencies, build and deploy/publish a new release
-# For more information see: https://docs.github.com/en/actions/guides/building-and-testing-java-with-maven
-
-name: Deploy and Publish
-
-on:
-  workflow_run:
-    workflows: ["Build and Test"]
-    branches: [ master ]
-    types:
-      - completed
-
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
 jobs:
   deploy:
-    if: "!contains(github.event.head_commit.message, 'skip ci')"
-    name: Deploy and Publish
     env:
-      MVN_ARGS: '-B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn'
-    runs-on: ubuntu-latest
-
+      MVN_ARGS: -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
+    if: '!contains(github.event.head_commit.message, ''skip ci'')'
+    name: Deploy and Publish
+    runs-on: self-hosted
     steps:
-    - uses: actions/checkout@v2
+    - continue-on-error: true
+      uses: actions/checkout@v2
       with:
         persist-credentials: false
-
-    - name: Set up Python
+    - continue-on-error: true
+      name: Set up Python
       uses: actions/setup-python@v2
       with:
         python-version: '3.8'
-
-    - name: Set up Java
+    - continue-on-error: true
+      name: Set up Java
       uses: actions/setup-java@v2
       with:
+        distribution: adopt
         java-version: '8'
-        distribution: 'adopt'
-
-    - name: Build Java package
+    - continue-on-error: true
+      name: Build Java package
       run: mvn verify -fae -DskipITs -Dskip.unit.tests $MVN_ARGS
-
-    - name: Setup Node
+    - continue-on-error: true
+      name: Setup Node
       uses: actions/setup-node@v1
       with:
         node-version: 20
+    - continue-on-error: true
+      name: Install Semantic Release dependencies
+      run: 'pip3 install --user bump2version
 
-    - name: Install Semantic Release dependencies
-      run: |
-        pip3 install --user bump2version
         npm install -g semantic-release
+
         npm install -g @semantic-release/changelog
+
         npm install -g @semantic-release/exec
+
         npm install -g @semantic-release/git
+
         npm install -g @semantic-release/github
+
         npm install -g @semantic-release/commit-analyzer
+
         npm install -g @semantic-release/release-notes-generator
 
-    - name: Check if semantic release generated a release
-      id: is_new_release
+        '
+    - continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: |
-        echo ::set-output name=IS_NEW_RELEASE::$(npx semantic-release --dry-run | grep -c -i "Published release")
+      id: is_new_release
+      name: Check if semantic release generated a release
+      run: 'echo ::set-output name=IS_NEW_RELEASE::$(npx semantic-release --dry-run
+        | grep -c -i "Published release")
+
         echo "The full TAG - ${{ github.ref }}"
 
-    - name: Get the nextRelease.version from semantic release
-      if: ${{ steps.is_new_release.outputs.IS_NEW_RELEASE == '1' }}
+        '
+    - continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       id: next_release
+      if: ${{ steps.is_new_release.outputs.IS_NEW_RELEASE == '1' }}
+      name: Get the nextRelease.version from semantic release
+      run: echo ::set-output name=NEXT_RELEASE::$(npx semantic-release --dry-run |
+        grep -oP "Published release \K[0-9]+\.[0-9]+\.[0-9]+")
+    - continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: echo ::set-output name=NEXT_RELEASE::$(npx semantic-release --dry-run | grep -oP "Published release \K[0-9]+\.[0-9]+\.[0-9]+")
-
-    - name: Publish to Git Releases and Tags
-      if:  ${{ steps.is_new_release.outputs.IS_NEW_RELEASE == '1' }}
+      if: ${{ steps.is_new_release.outputs.IS_NEW_RELEASE == '1' }}
+      name: Publish to Git Releases and Tags
+      run: npx semantic-release
+    - continue-on-error: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: npx semantic-release # --dry-run --branches 9662_addcheck
-
-    - name: Publish to Maven Central
-      if: ${{ steps.next_release.outputs.NEXT_RELEASE }}
-      env:
-        GHA_TAG: "refs/tags/v${{ steps.next_release.outputs.NEXT_RELEASE }}" # for setMavenVersion_gha
-        OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }} # for .travis.settings.xml
-        OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+        GHA_TAG: refs/tags/v${{ steps.next_release.outputs.NEXT_RELEASE }}
         GPG_KEYNAME: ${{ secrets.SIGNING_KEY }}
         GPG_PASSPHRASE: ${{ secrets.SIGNING_PASSWORD }}
-        SIGNING_PASSPHRASE: ${{ secrets.SIGNING_PASSPHRASE }} # for setupSigning_gha
-      run: |
-        echo "The NEXT_RELEASE - ${{ steps.next_release.outputs.NEXT_RELEASE }}"
-        echo -e "\n\033[0;35mCommand: setupSigning"
-        build/setupSigning_gha.sh
-        echo -e "\n\033[0;35mCommand: setMavenVersion"
-        build/setMavenVersion_gha.sh
-        echo -e "\n\033[0;35mCommand: mvn deploy"
-        mvn deploy --settings build/.travis.settings.xml -DskipITs -Dskip.unit.tests -P central $MVN_ARGS
-
-    - name: Publish Java docs
+        OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+        OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+        SIGNING_PASSPHRASE: ${{ secrets.SIGNING_PASSPHRASE }}
       if: ${{ steps.next_release.outputs.NEXT_RELEASE }}
-      env:
-        GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        GHA_REPO_SLUG: ${{ github.repository }}
-        GHA_BRANCH: ${{ github.ref }} # non PR only need to get last part
-        GHA_PULL_REQUEST: ${{ github.event.number }}
-        GHA_BUILD_NUMBER: ${{ github.run_number }}
-        GHA_JOB_NUMBER: ${{ github.job_number }}
-        GHA_COMMIT: ${{ github.sha }}
-        GHA_TAG: "refs/tags/v${{ steps.next_release.outputs.NEXT_RELEASE }}" # for setMavenVersion_gha
-      run: |
+      name: Publish to Maven Central
+      run: 'echo "The NEXT_RELEASE - ${{ steps.next_release.outputs.NEXT_RELEASE }}"
+
+        echo -e "\n\033[0;35mCommand: setupSigning"
+
+        build/setupSigning_gha.sh
+
+        echo -e "\n\033[0;35mCommand: setMavenVersion"
+
         build/setMavenVersion_gha.sh
+
+        echo -e "\n\033[0;35mCommand: mvn deploy"
+
+        mvn deploy --settings build/.travis.settings.xml -DskipITs -Dskip.unit.tests
+        -P central $MVN_ARGS
+
+        '
+    - continue-on-error: true
+      env:
+        GHA_BRANCH: ${{ github.ref }}
+        GHA_BUILD_NUMBER: ${{ github.run_number }}
+        GHA_COMMIT: ${{ github.sha }}
+        GHA_JOB_NUMBER: ${{ github.job_number }}
+        GHA_PULL_REQUEST: ${{ github.event.number }}
+        GHA_REPO_SLUG: ${{ github.repository }}
+        GHA_TAG: refs/tags/v${{ steps.next_release.outputs.NEXT_RELEASE }}
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      if: ${{ steps.next_release.outputs.NEXT_RELEASE }}
+      name: Publish Java docs
+      run: 'build/setMavenVersion_gha.sh
+
         mvn clean javadoc:aggregate $MVN_ARGS
+
         build/publish_gha.sh
 
-    - name: SKIP - Publish/Deploy to Git and Maven Central
-      if:  ${{ steps.is_new_release.outputs.IS_NEW_RELEASE == '0' }}
-      run: |
-        echo -e "\n\033[0;35mCommand: Skipping the deployment because semantic release has determined there are no relevant changes that warrent a new release.\n"
+        '
+    - continue-on-error: true
+      if: ${{ steps.is_new_release.outputs.IS_NEW_RELEASE == '0' }}
+      name: SKIP - Publish/Deploy to Git and Maven Central
+      run: 'echo -e "\n\033[0;35mCommand: Skipping the deployment because semantic
+        release has determined there are no relevant changes that warrent a new release.\n"
+
+        '
+name: Deploy and Publish
+on:
+  repository_dispatch:
+    types: trigger-ga___deploy.yml
